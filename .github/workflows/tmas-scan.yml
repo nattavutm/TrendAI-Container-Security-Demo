@@ -1,0 +1,57 @@
+name: TMAS Container Security Scan
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: trendai-container-demo
+  IMAGE_TAG: ${{ github.sha }}
+  REGISTRY: ghcr.io
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/trendai-container-demo
+
+jobs:
+  build-scan-push:
+    name: Build → Scan → Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ./app
+
+      - name: Download TMAS CLI
+        run: |
+          curl -s -L "https://ast-cli.xdr.trendmicro.com/tmas-cli/latest/tmas-cli_Linux_x86_64.tar.gz" | tar xz
+          chmod +x tmas
+
+      - name: Run TMAS Scan (Security Gate)
+        run: |
+          ./tmas scan docker:${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --vulnerabilities \
+            --secrets \
+            --malware \
+            --region ${{ secrets.VISION_ONE_REGION }}
+        env:
+          TMAS_API_KEY: ${{ secrets.TMAS_API_KEY }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        run: |
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY_IMAGE }}:latest
+          docker push ${{ env.REGISTRY_IMAGE }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGISTRY_IMAGE }}:latest
